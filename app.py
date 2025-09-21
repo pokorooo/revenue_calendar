@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 import streamlit as st
 from streamlit_calendar import calendar as st_calendar
@@ -16,6 +16,7 @@ def main():
         "initialView": "dayGridMonth",
         "initialDate": selected,
         "locale": "ja",
+        "timeZone": "local",
         "firstDay": 0,  # Sunday
         "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
         "weekNumbers": False,
@@ -29,51 +30,38 @@ def main():
 
     state = st_calendar(
         events=[],
-        options={**options, "selectable": True, "unselectAuto": True},
-        callbacks=["dateClick", "select"],
+        options=options,
+        callbacks=["dateClick"],
         key="month_calendar",
     )
 
-    # クリックした日付を保持し、入力画面を開く
-    def _extract_date(obj):
-        import re
-        if isinstance(obj, str):
-            m = re.search(r"\d{4}-\d{2}-\d{2}", obj)
-            return m.group(0) if m else None
-        if isinstance(obj, dict):
-            # prefer common keys
-            for k in ("dateStr","startStr","endStr","clickedDate"):
-                if k in obj and isinstance(obj[k], str):
-                    d = _extract_date(obj[k])
-                    if d: return d
-            for v in obj.values():
-                d = _extract_date(v)
-                if d: return d
-        if isinstance(obj, (list, tuple)):
-            for v in obj:
-                d = _extract_date(v)
-                if d: return d
-        return None
-
+    # クリックした日付を保持し、入力画面を開く（dateClick.dateStr を優先し、ISO日時はローカル日に補正）
     if isinstance(state, dict):
-        picked = None
         dc = state.get("dateClick")
-        if isinstance(dc, dict):
-            picked = _extract_date(dc)
-        if picked is None:
-            sel = state.get("select")
-            if isinstance(sel, dict):
-                picked = _extract_date(sel)
-        if picked is None:
-            picked = _extract_date(state)
-        if picked:
-            picked = picked[:10]
-            st.session_state["selected"] = picked
-            st.session_state["input_visible"] = True
+        def _normalize_date_str(val: str):
+            if not isinstance(val, str) or not val:
+                return None
+            s = val.strip()
+            # すでに日付のみ
+            if len(s) >= 10 and s[4] == '-' and s[7] == '-' and 'T' not in s:
+                return s[:10]
+            # ISO日時 -> ローカル日付へ変換
             try:
-                st.toast(f"{picked} を選択しました")
+                z = s.replace('Z', '+00:00')
+                dt = datetime.fromisoformat(z)
+                local_date = dt.astimezone().date().isoformat()
+                return local_date
             except Exception:
-                pass
+                # それでもダメなら先頭10文字を日付として扱う
+                return s[:10]
+
+        date_str = None
+        if isinstance(dc, dict):
+            ds = dc.get("dateStr") or dc.get("date")
+            date_str = _normalize_date_str(ds)
+        if date_str:
+            st.session_state["selected"] = date_str
+            st.session_state["input_visible"] = True
 
     # 入力パネル（買値・売値から収益を計算）: 日付クリック後に表示
     sel = st.session_state["selected"]
@@ -81,10 +69,24 @@ def main():
         st.subheader(f"入力（{sel}）")
         buy_key = f"buy_{sel}"
         sell_key = f"sell_{sel}"
+        sym_key = f"sym_{sel}"
         st.session_state.setdefault(buy_key, 0.0)
         st.session_state.setdefault(sell_key, 0.0)
+        st.session_state.setdefault(sym_key, "")
 
         with st.form(f"trade_form_{sel}"):
+            # 銘柄入力（1文字以上で候補表示）
+            st.text_input("銘柄", key=sym_key, placeholder="例: 7203 / トヨタ")
+            query = (st.session_state.get(sym_key) or "").strip()
+            if len(query) >= 1:
+                # 履歴から候補を作成
+                used_syms = [x.get("symbol", "") for x in st.session_state.get("simple_trades", [])]
+                candidates = sorted({s for s in used_syms if isinstance(s, str) and s.strip()})
+                suggestions = [s for s in candidates if query.lower() in s.lower()]
+                if suggestions:
+                    sel_sug = st.selectbox("候補", options=["選択しない"] + suggestions, key=f"sug_{sel}")
+                    if sel_sug and sel_sug != "選択しない":
+                        st.session_state[sym_key] = sel_sug
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
                 buy = st.number_input("買値", min_value=0.0, step=100.0, key=buy_key)
@@ -98,6 +100,7 @@ def main():
         if submitted:
             st.session_state["simple_trades"].append({
                 "date": sel,
+                "symbol": str(st.session_state[sym_key]).strip(),
                 "buy": float(st.session_state[buy_key] or 0.0),
                 "sell": float(st.session_state[sell_key] or 0.0),
                 "profit": float(profit),
@@ -109,17 +112,24 @@ def main():
         if entries:
             st.markdown("#### 登録済み")
             for idx, e in enumerate(entries):
-                cols = st.columns([3,3,3,1])
-                cols[0].write(f"買値: {e['buy']:,.2f}")
-                cols[1].write(f"売値: {e['sell']:,.2f}")
-                cols[2].write(f"収益: {e['profit']:,.2f}")
-                if cols[3].button("削除", key=f"del-{sel}-{idx}"):
+                cols = st.columns([3,2,2,2,1])
+                cols[0].write(f"銘柄: {e.get('symbol','') or '-'}")
+                cols[1].write(f"買値: {e['buy']:,.2f}")
+                cols[2].write(f"売値: {e['sell']:,.2f}")
+                cols[3].write(f"収益: {e['profit']:,.2f}")
+                if cols[4].button("削除", key=f"del-{sel}-{idx}"):
                     all_list = st.session_state["simple_trades"]
                     for j, a in enumerate(all_list):
-                        if a["date"]==sel and a["buy"]==e["buy"] and a["sell"]==e["sell"] and a["profit"]==e["profit"]:
+                        if (
+                            a.get("date")==sel and
+                            a.get("symbol","")==e.get("symbol","") and
+                            a.get("buy")==e.get("buy") and
+                            a.get("sell")==e.get("sell") and
+                            a.get("profit")==e.get("profit")
+                        ):
                             del all_list[j]
                             break
-                    st.experimental_rerun()
+                    # 変更は次の描画で反映されます
 
         if st.button("閉じる"):
             st.session_state["input_visible"] = False
