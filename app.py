@@ -12,6 +12,32 @@ def main():
     st.session_state.setdefault("input_visible", False)
 
     selected = st.session_state["selected"]
+
+    # 登録済みの収益を日別に集計してイベント化（プラス=赤、マイナス=緑、ゼロ=グレー）
+    def _fmt_amount(n: float) -> str:
+        sign = '+' if n > 0 else '-' if n < 0 else '±'
+        return f"{sign}{abs(n):,.0f}"
+
+    totals = {}
+    for e in st.session_state.get("simple_trades", []):
+        d = e.get("date")
+        p = float(e.get("profit") or 0.0)
+        if not d:
+            continue
+        totals[d] = totals.get(d, 0.0) + p
+
+    events = []
+    for d, amt in totals.items():
+        cls = "rc-pos" if amt > 0 else "rc-neg" if amt < 0 else "rc-zero"
+        events.append({
+            "title": _fmt_amount(amt),
+            "start": d,
+            "allDay": True,
+            # 色はCSSクラスで制御
+            "className": cls,
+            "classNames": [cls],
+        })
+
     options = {
         "initialView": "dayGridMonth",
         "initialDate": selected,
@@ -28,10 +54,18 @@ def main():
         "fixedWeekCount": False,
     }
 
+    custom_css = """
+    /* remove background/border and bolden text */
+    .fc .rc-pos, .fc .rc-neg, .fc .rc-zero { background: transparent !important; border: 0 !important; box-shadow: none !important; }
+    .fc .rc-pos .fc-event-main, .fc .rc-pos .fc-event-title { color:#ef4444 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
+    .fc .rc-neg .fc-event-main, .fc .rc-neg .fc-event-title { color:#10b981 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
+    .fc .rc-zero .fc-event-main, .fc .rc-zero .fc-event-title { color:#6b7280 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
+    """
     state = st_calendar(
-        events=[],
+        events=events,
         options=options,
         callbacks=["dateClick"],
+        custom_css=custom_css,
         key="month_calendar",
     )
 
