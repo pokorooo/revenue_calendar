@@ -60,13 +60,69 @@ def main():
     .fc .rc-pos .fc-event-main, .fc .rc-pos .fc-event-title { color:#ef4444 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
     .fc .rc-neg .fc-event-main, .fc .rc-neg .fc-event-title { color:#10b981 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
     .fc .rc-zero .fc-event-main, .fc .rc-zero .fc-event-title { color:#6b7280 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
+    /* container & sums placement */
+    .rc-calwrap { position: relative; }
+    .rc-sum { position:absolute; right:6px; bottom:6px; text-align:right; font-weight:700; background: transparent; }
+    .rc-sum .rc-pos { color:#ef4444 !important; }
+    .rc-sum .rc-neg { color:#10b981 !important; }
+    .rc-sum .rc-zero { color:#6b7280 !important; }
     """
+    st.markdown('<div class="rc-calwrap">', unsafe_allow_html=True)
     state = st_calendar(
         events=events,
         options=options,
-        callbacks=["dateClick"],
+        callbacks=["dateClick", "datesSet"],
         custom_css=custom_css,
         key="month_calendar",
+    )
+
+    # 表示中の月・年の合計を右下に表示
+    view_year = None
+    view_month = None
+    if isinstance(state, dict) and isinstance(state.get("datesSet"), dict):
+        info = state["datesSet"]
+        try:
+            start_str = info.get("startStr") or info.get("start")
+            end_str = info.get("endStr") or info.get("end")
+            if isinstance(start_str, str) and isinstance(end_str, str):
+                s = datetime.fromisoformat(start_str.replace('Z','+00:00')).astimezone()
+                e = datetime.fromisoformat(end_str.replace('Z','+00:00')).astimezone()
+                mid = s + (e - s) / 2
+                view_year, view_month = mid.year, mid.month
+        except Exception:
+            pass
+    if view_year is None or view_month is None:
+        try:
+            d0 = datetime.fromisoformat(selected)
+            view_year, view_month = d0.year, d0.month
+        except Exception:
+            today = date.today()
+            view_year, view_month = today.year, today.month
+
+    month_total = 0.0
+    year_total = 0.0
+    for ent in st.session_state.get("simple_trades", []):
+        ds = str(ent.get("date") or "")
+        try:
+            dt = datetime.fromisoformat(ds)
+        except Exception:
+            continue
+        if dt.year == view_year:
+            year_total += float(ent.get("profit") or 0.0)
+            if dt.month == view_month:
+                month_total += float(ent.get("profit") or 0.0)
+
+    def _cls_for(n: float) -> str:
+        return "rc-pos" if n > 0 else "rc-neg" if n < 0 else "rc-zero"
+
+    month_str = _fmt_amount(month_total)
+    year_str = _fmt_amount(year_total)
+    st.markdown(
+        f'<div class="rc-sum">'
+        f'<div>月合計: <span class="{_cls_for(month_total)}">{month_str}</span></div>'
+        f'<div>年合計: <span class="{_cls_for(year_total)}">{year_str}</span></div>'
+        f'</div></div>',
+        unsafe_allow_html=True
     )
 
     # クリックした日付を保持し、入力画面を開く（dateClick.dateStr を優先し、ISO日時はローカル日に補正）
