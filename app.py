@@ -1,7 +1,68 @@
 from datetime import date, datetime
+import re
 
 import streamlit as st
 from streamlit_calendar import calendar as st_calendar
+try:
+    import yfinance as yf
+    _HAS_YF = True
+except Exception:
+    _HAS_YF = False
+
+
+def _extract_symbol_token(text: str) -> str:
+    s = (text or "").strip().replace('／', '/').replace('　', ' ')
+    m = re.search(r"\b(\d{4})\b", s)
+    if m:
+        return m.group(1)
+    if '/' in s:
+        s = s.split('/', 1)[0].strip()
+    else:
+        s = s.split()[0] if s else s
+    return s
+
+
+def _normalize_symbol_for_yf(token: str) -> str:
+    t = (token or "").strip()
+    if t.isdigit() and len(t) == 4:
+        return f"{t}.T"
+    return t
+
+
+if _HAS_YF:
+    @st.cache_data(ttl=120)
+    def fetch_price(sym_text: str):
+        try:
+            token = _extract_symbol_token(sym_text)
+            if not token:
+                return (None, "", "")
+            norm = _normalize_symbol_for_yf(token)
+            tk = yf.Ticker(norm)
+            price = None
+            fi = getattr(tk, 'fast_info', None)
+            if fi:
+                for k in ("last_price", "lastPrice", "regular_market_price", "regularMarketPrice"):
+                    try:
+                        val = fi[k]
+                        if val is not None:
+                            price = float(val); break
+                    except Exception:
+                        pass
+            if price is not None:
+                return (price, norm, "更新値")
+            hist = tk.history(period="2d", interval="1d")
+            if hist is not None and not hist.empty and "Close" in hist:
+                last_close = float(hist["Close"].dropna().iloc[-1])
+                idx = hist.index[-1]
+                try:
+                    ts = idx.to_pydatetime()
+                    label = "当日終値" if ts.astimezone().date() == date.today() else "前日終値"
+                except Exception:
+                    label = "前日終値"
+                return (last_close, norm, label)
+            return (None, norm, "")
+        except Exception:
+            return (None, "", "")
 
 
 def main():
@@ -177,6 +238,26 @@ def main():
                     sel_sug = st.selectbox("候補", options=["選択しない"] + suggestions, key=f"sug_{sel}")
                     if sel_sug and sel_sug != "選択しない":
                         st.session_state[sym_key] = sel_sug
+            # 自動価格取得（yfinanceが使える場合）
+            fetch_clicked = False
+            if _HAS_YF:
+                cur_sym = (st.session_state.get(sym_key) or "").strip()
+                buy_v = float(st.session_state.get(buy_key, 0.0) or 0.0)
+                sell_v = float(st.session_state.get(sell_key, 0.0) or 0.0)
+                prefill_key = f"_prefilled_symbol_{sel}"
+                should_prefill = (len(cur_sym) >= 2) and (buy_v == 0.0 and sell_v == 0.0) and (st.session_state.get(prefill_key) != cur_sym)
+                col_btn, _ = st.columns([1,3])
+                with col_btn:
+                    fetch_clicked = st.form_submit_button("価格取得")
+                if should_prefill or fetch_clicked:
+                    price, norm, asof = fetch_price(cur_sym)
+                    if price is not None:
+                        st.session_state[buy_key] = float(price)
+                        st.session_state[sell_key] = float(price)
+                        st.session_state[prefill_key] = cur_sym
+                        st.caption(f"価格設定: {norm} ≈ {price:,.2f}（{asof}）")
+                    else:
+                        st.caption("価格を取得できませんでした。コード（例: 7203 / 7203.T）をご確認ください。")
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
                 buy = st.number_input("買値", min_value=0.0, step=100.0, key=buy_key)
