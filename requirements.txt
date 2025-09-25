@@ -1,0 +1,5 @@
+streamlit>=1.36.0
+streamlit-calendar>=1.0.0
+yfinance>=0.2.40
+streamlit-searchbox>=0.3.3
+

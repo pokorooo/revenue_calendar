@@ -2,9 +2,8 @@
 
 株の収益をカレンダーで確認できるアプリです。現在はStreamlit版のみ提供しています。
 
-- 実行: `streamlit run app.py`
+- ローカル実行: `pip install -r requirements.txt && streamlit run app.py`
 - 表示: streamlit_calendar による月カレンダー（日本語・日曜始まり）
-- 依存: `pip install streamlit-calendar`
 
 ## CSVフォーマット（FIFO損益計算）
 
@@ -21,6 +20,18 @@ date,symbol,side,quantity,price
 ## データ保存
 
 - セッション内で選択日などの状態を保持します。
+
+## デプロイ（Streamlit Community Cloud）
+
+1. 本リポジトリをGitHubにプッシュ
+2. https://share.streamlit.io にサインイン → New app
+3. リポジトリ/ブランチを選択し、Main file path に `app.py` を指定
+4. 依存は `requirements.txt` を自動で解決（本リポジトリに同梱）
+5. Deploy を押すだけで起動します
+
+注意:
+- 上場銘柄リスト（`data/jpx_symbols.csv`）はアプリ内の「銘柄リスト（上場企業）」から更新できます。
+- Streamlit Community Cloudではファイルは永続化されないことがあります。リストが見当たらない場合は、起動後に「更新」またはCSV取込で補完してください。
 
 ## よくある操作
 
