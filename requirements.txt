@@ -1,5 +1,5 @@
 streamlit>=1.36.0
 streamlit-calendar>=1.0.0
 yfinance>=0.2.40
-streamlit-searchbox>=0.3.3
-
+# Community Cloud supports up to 0.1.23 as of now
+streamlit-searchbox==0.1.23
