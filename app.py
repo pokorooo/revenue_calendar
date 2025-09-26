@@ -299,18 +299,12 @@ def main():
             if not isinstance(val, str) or not val:
                 return None
             s = val.strip()
-            # すでに日付のみ
-            if len(s) >= 10 and s[4] == '-' and s[7] == '-' and 'T' not in s:
+            # 常に日付部分だけを使用（タイムゾーン変換はしない）
+            if 'T' in s:
+                return s.split('T', 1)[0]
+            if len(s) >= 10 and s[4] == '-' and s[7] == '-':
                 return s[:10]
-            # ISO日時 -> ローカル日付へ変換
-            try:
-                z = s.replace('Z', '+00:00')
-                dt = datetime.fromisoformat(z)
-                local_date = dt.astimezone().date().isoformat()
-                return local_date
-            except Exception:
-                # それでもダメなら先頭10文字を日付として扱う
-                return s[:10]
+            return s[:10] if len(s) >= 10 else None
 
         date_str = None
         if isinstance(dc, dict):
