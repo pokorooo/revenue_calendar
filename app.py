@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 import re
 import os
 import csv
@@ -209,7 +210,7 @@ def main():
         "initialView": "dayGridMonth",
         "initialDate": selected,
         "locale": "ja",
-        "timeZone": "local",
+        "timeZone": "Asia/Tokyo",
         "firstDay": 0,  # Sunday
         "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
         "weekNumbers": False,
@@ -299,9 +300,15 @@ def main():
             if not isinstance(val, str) or not val:
                 return None
             s = val.strip()
-            # 常に日付部分だけを使用（タイムゾーン変換はしない）
+            # ISO日時が来た場合は必ずJSTに変換して日付のみを採用
             if 'T' in s:
-                return s.split('T', 1)[0]
+                try:
+                    z = s.replace('Z', '+00:00')
+                    dt = datetime.fromisoformat(z)
+                    jst = dt.astimezone(ZoneInfo('Asia/Tokyo'))
+                    return jst.date().isoformat()
+                except Exception:
+                    return s.split('T', 1)[0]
             if len(s) >= 10 and s[4] == '-' and s[7] == '-':
                 return s[:10]
             return s[:10] if len(s) >= 10 else None
