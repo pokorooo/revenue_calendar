@@ -80,6 +80,17 @@ if _HAS_YF:
             return (None, "", "")
 
 
+def _infer_step_from_price(price: float) -> float:
+    try:
+        p = float(price)
+    except Exception:
+        return 1.0
+    # 簡易ルール（目安）: 価格帯でステップを調整
+    if p < 1000: return 0.1
+    if p < 50000: return 1.0
+    return 100.0
+
+
 # ---------- Symbol Master (JPX) ----------
 @st.cache_data(ttl=60*60)
 def load_symbol_master():
@@ -561,10 +572,17 @@ def main():
 
         with st.form(f"trade_form_{sel}"):
             c1, c2, c3 = st.columns([1,1,1])
+            # 銘柄に応じてステップを推定（価格帯で可変）。手動取得後にも更新されます。
+            step_val = 1.0
+            cur_sym_text = st.session_state.get(sym_key) or ""
+            if _HAS_YF and cur_sym_text:
+                pr, _norm, _asof = fetch_price(cur_sym_text)
+                if pr is not None:
+                    step_val = _infer_step_from_price(pr)
             with c1:
-                buy = st.number_input("買値", min_value=0.0, step=1.0, key=buy_key)
+                buy = st.number_input("買値", min_value=0.0, step=step_val, key=buy_key)
             with c2:
-                sell = st.number_input("売値", min_value=0.0, step=1.0, key=sell_key)
+                sell = st.number_input("売値", min_value=0.0, step=step_val, key=sell_key)
             profit = float(st.session_state[sell_key]) - float(st.session_state[buy_key])
             with c3:
                 st.metric("収益", f"{profit:,.2f}")
