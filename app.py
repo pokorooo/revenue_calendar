@@ -562,9 +562,9 @@ def main():
         with st.form(f"trade_form_{sel}"):
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
-                buy = st.number_input("買値", min_value=0.0, step=100.0, key=buy_key)
+                buy = st.number_input("買値", min_value=0.0, step=1.0, key=buy_key)
             with c2:
-                sell = st.number_input("売値", min_value=0.0, step=100.0, key=sell_key)
+                sell = st.number_input("売値", min_value=0.0, step=1.0, key=sell_key)
             profit = float(st.session_state[sell_key]) - float(st.session_state[buy_key])
             with c3:
                 st.metric("収益", f"{profit:,.2f}")
