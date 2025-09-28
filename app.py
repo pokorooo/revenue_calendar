@@ -338,9 +338,11 @@ def main():
         st.subheader(f"入力（{sel}）")
         buy_key = f"buy_{sel}"
         sell_key = f"sell_{sel}"
+        qty_key = f"qty_{sel}"
         sym_key = f"sym_{sel}"
         st.session_state.setdefault(buy_key, 0.0)
         st.session_state.setdefault(sell_key, 0.0)
+        st.session_state.setdefault(qty_key, 100.0)
         st.session_state.setdefault(sym_key, "")
 
         # オフライン用 代表的上場銘柄（名称+ティッカー）
@@ -571,7 +573,7 @@ def main():
                     st.warning("価格を取得できませんでした。コード（例: 7203 / 7203.T）をご確認ください。")
 
         with st.form(f"trade_form_{sel}"):
-            c1, c2, c3 = st.columns([1,1,1])
+            c1, c2, c3, c4 = st.columns([1,1,1,1])
             # 銘柄に応じてステップを推定（価格帯で可変）。手動取得後にも更新されます。
             step_val = 1.0
             cur_sym_text = st.session_state.get(sym_key) or ""
@@ -583,8 +585,10 @@ def main():
                 buy = st.number_input("買値", min_value=0.0, step=step_val, key=buy_key)
             with c2:
                 sell = st.number_input("売値", min_value=0.0, step=step_val, key=sell_key)
-            profit = float(st.session_state[sell_key]) - float(st.session_state[buy_key])
             with c3:
+                qty = st.number_input("株数", min_value=0.0, step=100.0, key=qty_key)
+            profit = (float(st.session_state[sell_key]) - float(st.session_state[buy_key])) * float(st.session_state[qty_key] or 0.0)
+            with c4:
                 st.metric("収益", f"{profit:,.2f}")
             submitted = st.form_submit_button("保存")
 
@@ -594,6 +598,7 @@ def main():
                 "symbol": str(st.session_state[sym_key]).strip(),
                 "buy": float(st.session_state[buy_key] or 0.0),
                 "sell": float(st.session_state[sell_key] or 0.0),
+                "quantity": float(st.session_state[qty_key] or 0.0),
                 "profit": float(profit),
             })
             st.success("保存しました")
@@ -603,12 +608,13 @@ def main():
         if entries:
             st.markdown("#### 登録済み")
             for idx, e in enumerate(entries):
-                cols = st.columns([3,2,2,2,1])
+                cols = st.columns([3,2,2,2,2,1])
                 cols[0].write(f"銘柄: {e.get('symbol','') or '-'}")
                 cols[1].write(f"買値: {e['buy']:,.2f}")
                 cols[2].write(f"売値: {e['sell']:,.2f}")
-                cols[3].write(f"収益: {e['profit']:,.2f}")
-                if cols[4].button("削除", key=f"del-{sel}-{idx}"):
+                cols[3].write(f"株数: {int(e.get('quantity', 0))}")
+                cols[4].write(f"収益: {e['profit']:,.2f}")
+                if cols[5].button("削除", key=f"del-{sel}-{idx}"):
                     all_list = st.session_state["simple_trades"]
                     for j, a in enumerate(all_list):
                         if (
@@ -616,6 +622,7 @@ def main():
                             a.get("symbol","")==e.get("symbol","") and
                             a.get("buy")==e.get("buy") and
                             a.get("sell")==e.get("sell") and
+                            a.get("quantity",0)==e.get("quantity",0) and
                             a.get("profit")==e.get("profit")
                         ):
                             del all_list[j]
