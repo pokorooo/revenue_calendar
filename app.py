@@ -91,6 +91,20 @@ def _infer_step_from_price(price: float) -> float:
     return 100.0
 
 
+def _get_tax_rate() -> float:
+    # 少数（例: 0.20315）で保持。既定は20.315%
+    return float(st.session_state.get('tax_rate', 0.20315))
+
+
+def _net_after_tax(amount: float, rate: float) -> float:
+    # 利益にのみ課税。損失はそのまま（簡易モデル）
+    try:
+        a = float(amount)
+    except Exception:
+        return 0.0
+    return a - (rate * a) if a > 0 else a
+
+
 # ---------- Symbol Master (JPX) ----------
 @st.cache_data(ttl=60*60)
 def load_symbol_master():
@@ -189,18 +203,23 @@ def main():
     st.session_state.setdefault("selected", date.today().isoformat())
     st.session_state.setdefault("simple_trades", [])  # [{date, buy, sell, profit}]
     st.session_state.setdefault("input_visible", False)
+    st.session_state.setdefault("use_tax", True)
 
     selected = st.session_state["selected"]
 
-    # 登録済みの収益を日別に集計してイベント化（プラス=赤、マイナス=緑、ゼロ=グレー）
+    # 登録済みの収益を日別に集計してイベント化（税引後オプション対応、プラス=赤、マイナス=緑、ゼロ=グレー）
     def _fmt_amount(n: float) -> str:
         sign = '+' if n > 0 else '-' if n < 0 else '±'
         return f"{sign}{abs(n):,.0f}"
 
+    use_tax = bool(st.session_state.get('use_tax', True))
+    tax_rate = _get_tax_rate()
     totals = {}
     for e in st.session_state.get("simple_trades", []):
         d = e.get("date")
         p = float(e.get("profit") or 0.0)
+        if use_tax:
+            p = _net_after_tax(p, tax_rate)
         if not d:
             continue
         totals[d] = totals.get(d, 0.0) + p
@@ -246,6 +265,22 @@ def main():
     .rc-sum .rc-neg { color:#10b981 !important; }
     .rc-sum .rc-zero { color:#6b7280 !important; }
     """
+    # 上部右側にオプション（税設定）ポップオーバーを配置
+    top_cols = st.columns([8,1])
+    with top_cols[1]:
+        try:
+            pop = st.popover("⋯", use_container_width=True)
+        except Exception:
+            # st.popover が無い場合のフォールバック
+            pop = st.expander("⋯ オプション", expanded=False)
+        with pop:
+            st.markdown("**オプション**")
+            use_tax_new = st.checkbox('税引後の値を表示する', value=bool(st.session_state.get('use_tax', True)), key='use_tax_checkbox')
+            st.session_state['use_tax'] = use_tax_new
+            if use_tax_new:
+                pct = st.number_input('税率(%)', min_value=0.0, max_value=100.0, step=0.001, value=float(_get_tax_rate()*100), key='tax_input_global')
+                st.session_state['tax_rate'] = float(pct)/100.0
+
     st.markdown('<div class="rc-calwrap">', unsafe_allow_html=True)
     state = st_calendar(
         events=events,
@@ -287,9 +322,10 @@ def main():
         except Exception:
             continue
         if dt.year == view_year:
-            year_total += float(ent.get("profit") or 0.0)
+            val = float(ent.get("profit") or 0.0)
+            year_total += _net_after_tax(val, tax_rate) if use_tax else val
             if dt.month == view_month:
-                month_total += float(ent.get("profit") or 0.0)
+                month_total += _net_after_tax(val, tax_rate) if use_tax else val
 
     def _cls_for(n: float) -> str:
         return "rc-pos" if n > 0 else "rc-neg" if n < 0 else "rc-zero"
@@ -587,9 +623,13 @@ def main():
                 sell = st.number_input("売値", min_value=0.0, step=step_val, key=sell_key)
             with c3:
                 qty = st.number_input("株数", min_value=0.0, step=100.0, key=qty_key)
-            profit = (float(st.session_state[sell_key]) - float(st.session_state[buy_key])) * float(st.session_state[qty_key] or 0.0)
+            gross = (float(st.session_state[sell_key]) - float(st.session_state[buy_key])) * float(st.session_state[qty_key] or 0.0)
+            net = _net_after_tax(gross, _get_tax_rate())
             with c4:
-                st.metric("収益", f"{profit:,.2f}")
+                if bool(st.session_state.get('use_tax', True)):
+                    st.metric("税引後収益", f"{net:,.2f}")
+                else:
+                    st.metric("収益", f"{gross:,.2f}")
             submitted = st.form_submit_button("保存")
 
         if submitted:
@@ -599,7 +639,7 @@ def main():
                 "buy": float(st.session_state[buy_key] or 0.0),
                 "sell": float(st.session_state[sell_key] or 0.0),
                 "quantity": float(st.session_state[qty_key] or 0.0),
-                "profit": float(profit),
+                "profit": float(gross),
             })
             st.success("保存しました")
 
@@ -608,13 +648,18 @@ def main():
         if entries:
             st.markdown("#### 登録済み")
             for idx, e in enumerate(entries):
-                cols = st.columns([3,2,2,2,2,1])
+                show_tax = bool(st.session_state.get('use_tax', True))
+                cols = st.columns([3,2,2,2,2,2,1] if show_tax else [3,2,2,2,2,1])
                 cols[0].write(f"銘柄: {e.get('symbol','') or '-'}")
                 cols[1].write(f"買値: {e['buy']:,.2f}")
                 cols[2].write(f"売値: {e['sell']:,.2f}")
                 cols[3].write(f"株数: {int(e.get('quantity', 0))}")
                 cols[4].write(f"収益: {e['profit']:,.2f}")
-                if cols[5].button("削除", key=f"del-{sel}-{idx}"):
+                next_col = 5
+                if show_tax:
+                    cols[5].write(f"税引後: {_net_after_tax(float(e['profit']), _get_tax_rate()):,.2f}")
+                    next_col = 6
+                if cols[next_col].button("削除", key=f"del-{sel}-{idx}"):
                     all_list = st.session_state["simple_trades"]
                     for j, a in enumerate(all_list):
                         if (
