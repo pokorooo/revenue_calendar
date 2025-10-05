@@ -4,6 +4,8 @@ import re
 import os
 import csv
 import json
+import io
+import copy
 
 import streamlit as st
 from streamlit_calendar import calendar as st_calendar
@@ -568,7 +570,83 @@ def main():
     .rc-sum .rc-neg {{ color:{neg_color} !important; }}
     .rc-sum .rc-zero {{ color:{zero_color} !important; }}
     """
-    # 上部右側にオプション（税設定）ポップオーバーを配置
+    # Undoスタック（直前状態を保存）
+    st.session_state.setdefault("undo_stack", [])  # list[str(JSON)]
+
+    def _push_undo():
+        try:
+            snapshot = json.dumps(st.session_state.get("simple_trades", []), ensure_ascii=False)
+            st.session_state["undo_stack"].append(snapshot)
+        except Exception:
+            pass
+
+    def _pop_undo():
+        try:
+            stk = st.session_state.get("undo_stack", [])
+            if not stk:
+                return False
+            snapshot = stk.pop()
+            st.session_state["simple_trades"] = json.loads(snapshot)
+            return True
+        except Exception:
+            return False
+
+    # CSVインポート（simple_trades 形式に取り込み）
+    def _parse_import_csv(data_bytes: bytes) -> tuple[list[dict], list[str]]:
+        errs: list[str] = []
+        rows: list[dict] = []
+        if not data_bytes:
+            return rows, errs
+        text = None
+        for enc in ("utf-8-sig", "utf-8", "cp932"):
+            try:
+                text = data_bytes.decode(enc)
+                break
+            except Exception:
+                continue
+        if text is None:
+            errs.append("CSVのデコードに失敗しました")
+            return rows, errs
+        reader = csv.DictReader(io.StringIO(text))
+        def _get(d, names, default=""):
+            for n in names:
+                if n in d and d.get(n) not in (None,""):
+                    return d.get(n)
+            return default
+        for i, r in enumerate(reader, start=1):
+            try:
+                d = str(_get(r, ["date", "日付"]).strip())
+                sym = str(_get(r, ["symbol", "銘柄", "コード"]).strip())
+                buy = _get(r, ["buy", "買値"]) or ""
+                sell = _get(r, ["sell", "売値"]) or ""
+                qty = _get(r, ["quantity", "qty", "株数"]) or ""
+                prf = _get(r, ["profit", "収益"]) or ""
+                def _to_f(x):
+                    if x is None or x=="":
+                        return None
+                    return float(str(x).replace(",",""))
+                buy_v = _to_f(buy)
+                sell_v = _to_f(sell)
+                qty_v = _to_f(qty) or 0.0
+                prf_v = _to_f(prf)
+                if prf_v is None and (buy_v is not None and sell_v is not None):
+                    prf_v = (sell_v - buy_v) * qty_v
+                if not d:
+                    errs.append(f"{i}行目: dateが空です")
+                    continue
+                rows.append({
+                    "date": d[:10],
+                    "symbol": sym,
+                    "buy": float(buy_v or 0.0),
+                    "sell": float(sell_v or 0.0),
+                    "quantity": float(qty_v or 0.0),
+                    "profit": float(prf_v or 0.0),
+                })
+            except Exception as e:
+                errs.append(f"{i}行目: {e}")
+        return rows, errs
+
+    # 上部右側にオプション（税設定/データ）ポップオーバーを配置
     top_cols = st.columns([8,1])
     with top_cols[1]:
         try:
@@ -587,6 +665,26 @@ def main():
             if use_tax_new:
                 pct = st.number_input('税率(%)', min_value=0.0, max_value=100.0, step=0.001, value=float(_get_tax_rate()*100), key='tax_input_global')
                 st.session_state['tax_rate'] = float(pct)/100.0
+
+            st.markdown("---")
+            st.markdown("**データ**")
+            c_up1, c_up2 = st.columns([1,1])
+            with c_up1:
+                sample = "date,symbol,buy,sell,quantity,profit\n2025-10-01,7203.T,2400,2500,100,10000\n"
+                st.download_button("サンプルCSV", data=sample.encode("utf-8"), file_name="sample_trades.csv", mime="text/csv")
+            with c_up2:
+                if st.button("元に戻す", disabled=not st.session_state.get("undo_stack")):
+                    if _pop_undo():
+                        st.rerun()
+            up = st.file_uploader("CSV取込 (date,symbol,buy,sell,quantity,profit)", type=["csv"], key="uploader_trades")
+            if up is not None:
+                rows, errs = _parse_import_csv(up.read())
+                if rows:
+                    _push_undo()
+                    st.session_state["simple_trades"].extend(rows)
+                    st.success(f"{len(rows)}件を取り込みました")
+                if errs:
+                    st.caption("\n".join([f"・{e}" for e in errs]))
 
     st.markdown('<div class="rc-calwrap">', unsafe_allow_html=True)
     state = st_calendar(
@@ -965,7 +1063,7 @@ def main():
             st.markdown("#### 登録済み")
             for idx, e in enumerate(entries):
                 show_tax = bool(st.session_state.get('use_tax', True))
-                cols = st.columns([3,2,2,2,2,2,1] if show_tax else [3,2,2,2,2,1])
+                cols = st.columns([3,2,2,2,2,2,1,1,1] if show_tax else [3,2,2,2,2,1,1,1])
                 cols[0].write(f"銘柄: {e.get('symbol','') or '-'}")
                 cols[1].write(f"買値: {e['buy']:,.2f}")
                 cols[2].write(f"売値: {e['sell']:,.2f}")
@@ -975,7 +1073,14 @@ def main():
                 if show_tax:
                     cols[5].write(f"税引後: {_net_after_tax(float(e['profit']), _get_tax_rate()):,.2f}")
                     next_col = 6
-                if cols[next_col].button("削除", key=f"del-{sel}-{idx}"):
+                if cols[next_col].button("編集", key=f"edit-{sel}-{idx}"):
+                    st.session_state[f"_editing_{sel}_{idx}"] = True
+                if cols[next_col+1].button("複製", key=f"dup-{sel}-{idx}"):
+                    _push_undo()
+                    st.session_state["simple_trades"].append(copy.deepcopy(e))
+                    st.success("複製しました")
+                if cols[next_col+2].button("削除", key=f"del-{sel}-{idx}"):
+                    _push_undo()
                     all_list = st.session_state["simple_trades"]
                     for j, a in enumerate(all_list):
                         if (
@@ -989,6 +1094,25 @@ def main():
                             del all_list[j]
                             break
                     # 変更は次の描画で反映されます
+
+                # インライン編集フォーム
+                if st.session_state.get(f"_editing_{sel}_{idx}"):
+                    with st.expander("編集", expanded=True):
+                        eb = st.number_input("買値", value=float(e.get("buy",0.0)), step=1.0, key=f"_eb_{sel}_{idx}")
+                        es = st.number_input("売値", value=float(e.get("sell",0.0)), step=1.0, key=f"_es_{sel}_{idx}")
+                        eq = st.number_input("株数", value=float(e.get("quantity",0.0)), step=100.0, key=f"_eq_{sel}_{idx}")
+                        esym = st.text_input("銘柄", value=str(e.get("symbol","")), key=f"_esy_{sel}_{idx}")
+                        if st.button("更新", key=f"_update_{sel}_{idx}"):
+                            _push_undo()
+                            e.update({
+                                "buy": float(eb or 0.0),
+                                "sell": float(es or 0.0),
+                                "quantity": float(eq or 0.0),
+                                "symbol": str(esym or "").strip(),
+                                "profit": (float(es or 0.0) - float(eb or 0.0)) * float(eq or 0.0),
+                            })
+                            st.session_state[f"_editing_{sel}_{idx}"] = False
+                            st.success("更新しました")
 
         if st.button("閉じる"):
             st.session_state["input_visible"] = False
