@@ -199,6 +199,223 @@ def symbol_master_age_days() -> int | None:
 
 def main():
     st.set_page_config(page_title="株の収益カレンダー", layout="wide")
+    # 現在のテーマ（light/dark）を把握して色を最適化
+    try:
+        _theme_base = st.get_option('theme.base') or 'light'
+    except Exception:
+        _theme_base = 'light'
+    # アプリ内トグル優先、なければStreamlitテーマに追従
+    _dark_pref = st.session_state.get('rc_dark_mode', None)
+    is_dark = bool(_dark_pref) if _dark_pref is not None else (str(_theme_base).lower() == 'dark')
+
+    # 背景・文字色（簡易）をテーマに合わせて適用
+    if is_dark:
+        bg = "#0b1220"   # 深めのダーク
+        fg = "#ffffff"   # 文字は白で統一
+        st.markdown(
+            f"""
+            <style>
+            .stApp {{ background-color: {bg}; color: {fg}; }}
+            /* Top-right option (popover/expander) button to gray */
+            div[data-testid="stPopover"] > button,
+            div[data-testid="stPopover"] button,
+            div[data-testid="stExpander"] > details > summary,
+            div[data-testid="stExpander"] summary {{
+                background-color: #3a3a3a !important;
+                color: #ffffff !important;
+                border: 1px solid #545454 !important;
+                border-radius: 6px !important;
+                box-shadow: none !important;
+            }}
+            div[data-testid="stPopover"] > button:hover,
+            div[data-testid="stPopover"] button:hover,
+            div[data-testid="stExpander"] > details > summary:hover,
+            div[data-testid="stExpander"] summary:hover {{
+                background-color: #4a4a4a !important;
+                border-color: #6b7280 !important;
+            }}
+            /* All buttons in dark mode (e.g., 価格取得/閉じる) */
+            .stButton > button {{
+                background-color: #3a3a3a !important;
+                color: #ffffff !important;
+                border: 1px solid #545454 !important;
+                box-shadow: none !important;
+            }}
+            .stButton > button:hover {{
+                background-color: #4a4a4a !important;
+                border-color: #6b7280 !important;
+            }}
+            .stButton > button:active {{
+                background-color: #2f2f2f !important;
+                border-color: #4b5563 !important;
+            }}
+            /* Broaden selector for safety (inside our panel and general) */
+            .rc-input .stButton button,
+            .rc-input button,
+            button[data-testid^="baseButton-"] {{
+                background-color: #3a3a3a !important;
+                color: #ffffff !important;
+                border: 1px solid #545454 !important;
+                box-shadow: none !important;
+            }}
+            .rc-input .stButton button:hover,
+            .rc-input button:hover,
+            button[data-testid^="baseButton-"]:hover {{
+                background-color: #4a4a4a !important;
+                border-color: #6b7280 !important;
+            }}
+            .rc-input .stButton button:active,
+            .rc-input button:active,
+            button[data-testid^="baseButton-"]:active {{
+                background-color: #2f2f2f !important;
+                border-color: #4b5563 !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # 入力パネルの見た目（テーマに合わせてグレー系に）
+    # ダーク: グレー基調でカード風に、ライト: 薄いグレー
+    input_bg = "#2a2a2a" if is_dark else "#f3f4f6"
+    input_fg = "#ffffff" if is_dark else "#111827"
+    input_border = "#4b5563" if is_dark else "#e5e7eb"
+    st.markdown(
+        f"""
+        <style>
+        .rc-input {{
+            background-color: {input_bg};
+            color: {input_fg};
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 0 !important;
+            box-shadow: none !important;
+        }}
+        .rc-input .stMarkdown, .rc-input .stMetric, .rc-input label {{ color: {input_fg}; }}
+        .rc-input .rc-label {{ color: {input_fg} !important; font-weight: 600; margin-bottom: 4px; }}
+        /* テキスト入力のラベル（銘柄（直接入力））も白に */
+        .rc-input [data-testid="stWidgetLabel"],
+        .rc-input [data-testid="stWidgetLabel"] * ,
+        .rc-input .stTextInput label {{
+            color: {input_fg} !important;
+        }}
+        /* 税引後収益の数値とラベルも白に強制（ダーク時） */
+        .rc-input .stMetric, .rc-input .stMetric * {{ color: {input_fg} !important; }}
+        .rc-input [data-testid="stMetricValue"],
+        .rc-input [data-testid="stMetricDelta"] {{ color: {input_fg} !important; }}
+        /* 入力欄もカード内で馴染むように */
+        .rc-input input, .rc-input textarea, .rc-input select {{
+            background-color: {('#3a3a3a' if is_dark else '#ffffff')} !important;
+            color: {input_fg} !important;
+            border-color: {('#3f3f46' if is_dark else input_border)} !important;
+            box-shadow: none !important;
+        }}
+        .rc-input .stNumberInput input {{
+            background-color: {('#3a3a3a' if is_dark else '#ffffff')} !important;
+            color: {input_fg} !important;
+            border-color: {('#3f3f46' if is_dark else input_border)} !important;
+            box-shadow: none !important;
+        }}
+        /* Streamlit TextInput (BaseWeb) の親コンテナも上書き */
+        .rc-input [data-testid="stTextInput"] div[data-baseweb="input"] {{
+            background-color: {('#3a3a3a' if is_dark else '#ffffff')} !important;
+            border-color: {('#3f3f46' if is_dark else input_border)} !important;
+            color: {input_fg} !important;
+            box-shadow: none !important;
+        }}
+        .rc-input [data-testid="stTextInput"] div[data-baseweb="input"] input {{
+            background-color: transparent !important;
+            color: {input_fg} !important;
+        }}
+        /* さらに直接のテキスト型も強制 */
+        .rc-input input[type="text"] {{
+            background-color: {('#3a3a3a' if is_dark else '#ffffff')} !important;
+            color: {input_fg} !important;
+            border-color: {('#3f3f46' if is_dark else input_border)} !important;
+        }}
+        .rc-input input:focus, .rc-input textarea:focus, .rc-input select:focus,
+        .rc-input .stNumberInput input:focus {{
+            border-color: {('#525252' if is_dark else input_border)} !important;
+            box-shadow: {('0 0 0 1px #525252 inset' if is_dark else 'none')} !important;
+            outline: none !important;
+        }}
+        .rc-input ::placeholder {{ color: {('#d1d5db' if is_dark else '#6b7280')} !important; }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ダークモード時のボタン/ラベル/入力欄のスタイル統一（Formスコープで強制適用）
+    if is_dark:
+        st.markdown(
+            """
+            <style>
+            /* 入力フォーム全体をグレーのカードに */
+            div[data-testid="stForm"] {
+                background-color: #2a2a2a !important;
+                color: #ffffff !important;
+                padding: 12px 16px;
+                border-radius: 8px;
+                border: 0 !important;
+                box-shadow: none !important;
+            }
+            /* ラベル/テキスト/メトリックを白 */
+            div[data-testid="stForm"] label,
+            div[data-testid="stForm"] .stMarkdown,
+            div[data-testid="stForm"] [data-testid="stMetricValue"],
+            div[data-testid="stForm"] [data-testid="stMetricDelta"],
+            div[data-testid="stForm"] .stMetric,
+            div[data-testid="stForm"] .stMetric * {
+                color: #ffffff !important;
+            }
+            /* 入力欄: 背景グレー、枠は目立たない濃グレー */
+            div[data-testid="stForm"] input,
+            div[data-testid="stForm"] textarea,
+            div[data-testid="stForm"] select,
+            div[data-testid="stForm"] [data-testid="stNumberInput"] input,
+            div[data-testid="stForm"] input[type="number"] {
+                background-color: #3a3a3a !important;
+                color: #ffffff !important;
+                border-color: #3f3f46 !important;
+                box-shadow: none !important;
+            }
+            div[data-testid="stForm"] input::placeholder,
+            div[data-testid="stForm"] textarea::placeholder { color: #d1d5db !important; }
+            div[data-testid="stForm"] input:focus,
+            div[data-testid="stForm"] textarea:focus,
+            div[data-testid="stForm"] select:focus,
+            div[data-testid="stForm"] [data-testid="stNumberInput"] input:focus {
+                border-color: #525252 !important;
+                box-shadow: 0 0 0 1px #525252 inset !important;
+                outline: none !important;
+            }
+            /* 保存ボタンを含むボタン類をグレー系に */
+            div[data-testid="stForm"] [data-testid="stFormSubmitButton"] > button,
+            div[data-testid="stForm"] .stButton > button,
+            .rc-input .stButton > button,
+            .stDownloadButton > button {
+                background-color: #3a3a3a !important;
+                color: #ffffff !important;
+                border: 1px solid #545454 !important;
+            }
+            div[data-testid="stForm"] [data-testid="stFormSubmitButton"] > button:hover,
+            div[data-testid="stForm"] .stButton > button:hover,
+            .rc-input .stButton > button:hover,
+            .stDownloadButton > button:hover {
+                background-color: #4a4a4a !important;
+                border-color: #6b7280 !important;
+            }
+            div[data-testid="stForm"] [data-testid="stFormSubmitButton"] > button:active,
+            div[data-testid="stForm"] .stButton > button:active,
+            .rc-input .stButton > button:active,
+            .stDownloadButton > button:active {
+                background-color: #2f2f2f !important;
+                border-color: #4b5563 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
     # 初期状態
     st.session_state.setdefault("selected", date.today().isoformat())
     st.session_state.setdefault("simple_trades", [])  # [{date, buy, sell, profit}]
@@ -243,6 +460,8 @@ def main():
         "timeZone": "Asia/Tokyo",
         "firstDay": 0,  # Sunday
         "headerToolbar": {"left": "prev,next today", "center": "title", "right": ""},
+        # ヘッダー行（曜日帯）を非表示にして白帯を根本解消
+        "dayHeaders": False,
         "weekNumbers": False,
         "navLinks": False,
         "editable": False,
@@ -252,18 +471,102 @@ def main():
         "fixedWeekCount": False,
     }
 
-    custom_css = """
+    zero_color = "#ffffff" if is_dark else "#6b7280"
+    pos_color = "#ffffff" if is_dark else "#ef4444"  # red-500
+    neg_color = "#ffffff" if is_dark else "#10b981"  # emerald-500
+    cal_bg = "#000000" if is_dark else "transparent"
+    cal_grid = "#1f2937" if is_dark else "#e5e7eb"
+    cal_fg = "#ffffff" if is_dark else "inherit"
+    cal_border = "#000000" if is_dark else "transparent"
+    # Grid lines inside calendar should remain visible in dark mode
+    grid_color = cal_grid  # use dark gray (not pure black)
+    custom_css = f"""
     /* remove background/border and bolden text */
-    .fc .rc-pos, .fc .rc-neg, .fc .rc-zero { background: transparent !important; border: 0 !important; box-shadow: none !important; }
-    .fc .rc-pos .fc-event-main, .fc .rc-pos .fc-event-title { color:#ef4444 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
-    .fc .rc-neg .fc-event-main, .fc .rc-neg .fc-event-title { color:#10b981 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
-    .fc .rc-zero .fc-event-main, .fc .rc-zero .fc-event-title { color:#6b7280 !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }
+    .fc .rc-pos, .fc .rc-neg, .fc .rc-zero {{ background: transparent !important; border: 0 !important; box-shadow: none !important; }}
+    .fc .rc-pos .fc-event-main, .fc .rc-pos .fc-event-title {{ color:{pos_color} !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }}
+    .fc .rc-neg .fc-event-main, .fc .rc-neg .fc-event-title {{ color:{neg_color} !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }}
+    .fc .rc-zero .fc-event-main, .fc .rc-zero .fc-event-title {{ color:{zero_color} !important; font-weight:700 !important; text-align:right; white-space:nowrap; padding-right:4px; }}
+    /* Force calendar dark background when dark mode */
+    .fc-theme-standard .fc-scrollgrid,
+    .fc .fc-view-harness,
+    .fc .fc-col-header,
+    .fc .fc-col-header-cell,
+    .fc .fc-daygrid,
+    .fc .fc-daygrid-day,
+    .fc .fc-daygrid-day-frame,
+    .fc .fc-toolbar.fc-header-toolbar {{
+        background-color: {cal_bg} !important;
+    }}
+    .fc .fc-daygrid-day-bg, .fc .fc-daygrid-day-top, .fc .fc-daygrid-body {{
+        background-color: {cal_bg} !important;
+    }}
+    /* Body section right under the header (where white band appears) */
+    .fc .fc-scrollgrid-section-body,
+    .fc .fc-scrollgrid-section-body table,
+    .fc .fc-scrollgrid-section-header + .fc-scrollgrid-section,
+    .fc .fc-scrollgrid-section-header + .fc-scrollgrid-section table,
+    .fc .fc-daygrid-body,
+    .fc .fc-daygrid-body table,
+    .fc .fc-scrollgrid .fc-scroller-harness,
+    .fc .fc-scrollgrid .fc-scroller-harness-liquid,
+    .fc .fc-scrollgrid .fc-scroller {{
+        background-color: {cal_bg} !important;
+    }}
+    /* Header row explicit background */
+    .fc .fc-col-header, .fc .fc-col-header * {{
+        background-color: {cal_bg} !important;
+    }}
+    .fc .fc-scrollgrid, .fc .fc-scrollgrid table, .fc .fc-scrollgrid thead,
+    .fc .fc-scrollgrid thead tr, .fc .fc-scrollgrid thead th {{
+        background-color: {cal_bg} !important;
+    }}
+    /* Remove outer frame of calendar to avoid border between year-total and input */
+    .fc-theme-standard .fc-scrollgrid {{ border: 0 !important; }}
+    .fc {{ --fc-border-color: {grid_color} !important; }}
+    .fc-theme-standard .fc-scrollgrid, .fc-theme-standard td, .fc-theme-standard th {{ border-color: {grid_color} !important; }}
+    /* Explicitly tune header borders to black in dark */
+    .fc .fc-toolbar.fc-header-toolbar {{ border-bottom: 1px solid {cal_border} !important; box-shadow: none !important; background-color: {cal_bg} !important; }}
+    .fc-theme-standard .fc-scrollgrid {{ border-top: 1px solid {cal_border} !important; }}
+    .fc-theme-standard .fc-scrollgrid thead {{ border-top: 1px solid {cal_border} !important; }}
+    .fc-theme-standard .fc-col-header,
+    .fc-theme-standard .fc-col-header-cell,
+    .fc-theme-standard thead th,
+    .fc-theme-standard th {{ border-top: 1px solid {cal_border} !important; }}
+    .fc-theme-standard th, .fc-theme-standard td {{ border-top-color: {cal_border} !important; }}
+    .fc .fc-scrollgrid-section-header, .fc .fc-scrollgrid-section-header table {{
+        background-color: {cal_bg} !important;
+        border-top: 1px solid {cal_border} !important;
+    }}
+    /* Simplest fix: completely hide the day header section */
+    .fc .fc-scrollgrid-section-header {{ display: none !important; height: 0 !important; border: 0 !important; }}
+    .fc .fc-col-header, .fc .fc-col-header * {{ display: none !important; }}
+    .fc .fc-scrollgrid-section-header + .fc-scrollgrid-section {{ border-top: 0 !important; }}
+    /* If theme variables are used, override calendar page BG to black */
+    .fc {{ --fc-page-bg-color: {cal_bg} !important; --fc-neutral-bg-color: {cal_bg} !important; }}
+    /* Overlay black lines to mask any residual white hairlines */
+    .fc .fc-toolbar.fc-header-toolbar {{ position: relative !important; }}
+    .fc .fc-toolbar.fc-header-toolbar::after {{
+        content: '';
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 1px; background-color: {cal_border};
+        z-index: 3; pointer-events: none;
+    }}
+    .fc .fc-col-header {{ position: relative !important; }}
+    .fc .fc-col-header::before {{
+        content: '';
+        position: absolute;
+        left: 0; right: 0; top: 0; bottom: 0;
+        background-color: {cal_bg};
+        z-index: 0; pointer-events: none;
+    }}
+    .fc, .fc * {{ color: {cal_fg} !important; }}
     /* container & sums placement */
-    .rc-calwrap { position: relative; }
-    .rc-sum { position:absolute; right:6px; bottom:6px; text-align:right; font-weight:700; background: transparent; }
-    .rc-sum .rc-pos { color:#ef4444 !important; }
-    .rc-sum .rc-neg { color:#10b981 !important; }
-    .rc-sum .rc-zero { color:#6b7280 !important; }
+    .rc-calwrap {{ position: relative; }}
+    .rc-sum {{ position:absolute; right:6px; bottom:6px; text-align:right; font-weight:700; background: transparent; }}
+    .rc-sum .rc-pos {{ color:{pos_color} !important; }}
+    .rc-sum .rc-neg {{ color:{neg_color} !important; }}
+    .rc-sum .rc-zero {{ color:{zero_color} !important; }}
     """
     # 上部右側にオプション（税設定）ポップオーバーを配置
     top_cols = st.columns([8,1])
@@ -275,6 +578,10 @@ def main():
             pop = st.expander("⋯ オプション", expanded=False)
         with pop:
             st.markdown("**オプション**")
+            # アプリ内ダークモード切替（ストリームリットの設定が見えない場合の代替）
+            dm_default = bool(st.session_state.get('rc_dark_mode', is_dark))
+            dm = st.checkbox('ダークモード', value=dm_default, key='rc_dark_mode')
+            st.caption("右上の設定からテーマが出ない場合はこのスイッチをご利用ください。")
             use_tax_new = st.checkbox('税引後の値を表示する', value=bool(st.session_state.get('use_tax', True)), key='use_tax_checkbox')
             st.session_state['use_tax'] = use_tax_new
             if use_tax_new:
@@ -287,7 +594,7 @@ def main():
         options=options,
         callbacks=["dateClick", "datesSet"],
         custom_css=custom_css,
-        key="month_calendar",
+        key=f"month_calendar_{'dark' if is_dark else 'light'}",
     )
 
     # 表示中の月・年の合計を右下に表示
@@ -371,6 +678,7 @@ def main():
     # 入力パネル（買値・売値から収益を計算）: 日付クリック後に表示
     sel = st.session_state["selected"]
     if st.session_state.get("input_visible"):
+        st.markdown('<div class="rc-input">', unsafe_allow_html=True)
         st.subheader(f"入力（{sel}）")
         buy_key = f"buy_{sel}"
         sell_key = f"sell_{sel}"
@@ -390,13 +698,20 @@ def main():
             ("9432.T", "ＮＴＴ"), ("9433.T", "ＫＤＤＩ"), ("9434.T", "ソフトバンク"),
             ("8316.T", "三井住友フィナンシャルグループ"), ("8306.T", "三菱ＵＦＪフィナンシャル・グループ"),
             ("8411.T", "みずほフィナンシャルグループ"), ("8058.T", "三菱商事"), ("8031.T", "三井物産"),
+            ("5706.T", "三井金属鉱山"), ("5713.T", "住友金属鉱山"), ("5711.T", "三菱マテリアル"), ("5714.T", "ＤＯＷＡホールディングス"),
             ("2768.T", "双日"), ("4901.T", "富士フイルムＨＤ"), ("4063.T", "信越化学工業"),
-            ("4502.T", "武田薬品工業"), ("4503.T", "アステラス製薬"), ("4523.T", "エーザイ"),
+            ("4502.T", "武田薬品工業"), ("4503.T", "アステラス製薬"), ("4523.T", "エーザイ"), ("4568.T", "第一三共"), ("4519.T", "中外製薬"),
             ("5108.T", "ブリヂストン"), ("6752.T", "パナソニックＨＤ"), ("2914.T", "日本たばこ産業"),
-            ("1605.T", "ＩＮＰＥＸ"), ("5020.T", "ＥＮＥＯＳホールディングス"), ("7201.T", "日産自動車"),
-            ("7267.T", "ホンダ"), ("4062.T", "イビデン"), ("6594.T", "ニデック"), ("6324.T", "ハーモニックドライブ"),
-            ("8725.T", "MS&AD保険グループHD"), ("8630.T", "ＳＯＭＰＯホールディングス"), ("8766.T", "東京海上HD"),
-            ("7272.T", "ヤマハ発動機"),
+            ("1605.T", "ＩＮＰＥＸ"), ("5020.T", "ＥＮＥＯＳホールディングス"),
+            ("7201.T", "日産自動車"), ("7267.T", "ホンダ"), ("7269.T", "スズキ"), ("7270.T", "ＳＵＢＡＲＵ"), ("6902.T", "デンソー"),
+            ("4062.T", "イビデン"), ("6594.T", "ニデック"), ("6762.T", "ＴＤＫ"), ("6988.T", "日東電工"),
+            ("6324.T", "ハーモニックドライブ"), ("6367.T", "ダイキン工業"), ("6273.T", "ＳＭＣ"), ("7735.T", "ＳＣＲＥＥＮホールディングス"), ("7731.T", "ニコン"), ("7752.T", "リコー"),
+            ("4661.T", "オリエンタルランド"), ("3382.T", "セブン＆アイ・ホールディングス"),
+            ("8001.T", "伊藤忠商事"), ("8002.T", "丸紅"), ("8053.T", "住友商事"), ("8591.T", "オリックス"),
+            ("5201.T", "ＡＧＣ"), ("3402.T", "東レ"),
+            ("6098.T", "リクルートホールディングス"),
+            ("9021.T", "ＪＲ西日本"), ("9022.T", "ＪＲ東海"), ("9201.T", "日本航空"), ("9202.T", "ＡＮＡ ＨＤ"),
+            ("5401.T", "日本製鉄"), ("5411.T", "ＪＦＥホールディングス"),
         ]
 
         def _norm_ja(s: str) -> str:
@@ -418,7 +733,7 @@ def main():
             st.session_state.pop('apply_sym', None)
             st.session_state.pop('apply_sym_key', None)
 
-        # 銘柄入力（タイプ中にプルダウンで候補表示：streamlit-searchbox を優先利用）
+        # 銘柄入力（タイプ中にプルダウンで候補表示：streamlit-searchbox を優先利用／モード共通）
         if _HAS_SB:
             def _search_candidates(term: str):
                 term = (term or '').strip()
@@ -519,7 +834,11 @@ def main():
             if sel_label:
                 st.session_state[sym_key] = sel_label
         else:
-            st.text_input("銘柄（直接入力）", key=sym_key, placeholder="例: 7203 / トヨタ / toyota")
+            if is_dark:
+                st.markdown('<div class="rc-label">銘柄（直接入力）</div>', unsafe_allow_html=True)
+                st.text_input("", key=sym_key, placeholder="例: 7203 / トヨタ / toyota", label_visibility="collapsed")
+            else:
+                st.text_input("銘柄（直接入力）", key=sym_key, placeholder="例: 7203 / トヨタ / toyota")
             query = (st.session_state.get(sym_key) or "").strip()
         # ensure query is always defined regardless of input widget type
         query = (st.session_state.get(sym_key) or "").strip()
@@ -594,7 +913,6 @@ def main():
                     st.session_state[buy_key] = float(price)
                     st.session_state[sell_key] = float(price)
                     st.session_state[prefill_key] = cur_sym
-                    st.info(f"価格設定: {norm} = {price:,.2f}（{asof}）")
 
         # 価格取得（フォーム外ボタン）
         if _HAS_YF:
@@ -604,9 +922,7 @@ def main():
                 if price is not None:
                     st.session_state[buy_key] = float(price)
                     st.session_state[sell_key] = float(price)
-                    st.success(f"価格設定: {norm} = {price:,.2f}（{asof}）")
-                else:
-                    st.warning("価格を取得できませんでした。コード（例: 7203 / 7203.T）をご確認ください。")
+                    # 取得結果の通知は行わない（UI上のノイズを減らす）
 
         with st.form(f"trade_form_{sel}"):
             c1, c2, c3, c4 = st.columns([1,1,1,1])
@@ -676,6 +992,7 @@ def main():
 
         if st.button("閉じる"):
             st.session_state["input_visible"] = False
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("日付セルをクリックして入力を開きます。")
 
