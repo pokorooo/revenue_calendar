@@ -570,6 +570,45 @@ def main():
     .rc-sum .rc-neg {{ color:{neg_color} !important; }}
     .rc-sum .rc-zero {{ color:{zero_color} !important; }}
     """
+    # 保存/読込ユーティリティ
+    DATA_DIR = 'data'
+    TRADES_JSON = os.path.join(DATA_DIR, 'simple_trades.json')
+
+    def _ensure_data_dir():
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+        except Exception:
+            pass
+
+    def _export_csv_text(trades: list[dict]) -> str:
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(['date','symbol','buy','sell','quantity','profit'])
+        for t in (trades or []):
+            w.writerow([t.get('date',''), t.get('symbol',''),
+                        t.get('buy',0.0), t.get('sell',0.0), t.get('quantity',0.0), t.get('profit',0.0)])
+        return buf.getvalue()
+
+    def _save_trades(trades: list[dict]) -> None:
+        _ensure_data_dir()
+        try:
+            with open(TRADES_JSON, 'w', encoding='utf-8') as f:
+                json.dump({'items': trades, 'savedAt': datetime.utcnow().isoformat()}, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _load_trades() -> list[dict]:
+        try:
+            if os.path.exists(TRADES_JSON):
+                with open(TRADES_JSON, encoding='utf-8') as f:
+                    obj = json.load(f)
+                items = obj.get('items') if isinstance(obj, dict) else None
+                if isinstance(items, list):
+                    return items
+        except Exception:
+            pass
+        return []
+
     # Undoスタック（直前状態を保存）
     st.session_state.setdefault("undo_stack", [])  # list[str(JSON)]
 
@@ -646,6 +685,14 @@ def main():
                 errs.append(f"{i}行目: {e}")
         return rows, errs
 
+    # 初回ロード時に永続化ファイルから復元（セッションが空の場合）
+    if not st.session_state.get("_trades_loaded_once"):
+        if not st.session_state.get("simple_trades"):
+            loaded = _load_trades()
+            if loaded:
+                st.session_state["simple_trades"] = loaded
+        st.session_state["_trades_loaded_once"] = True
+
     # 上部右側にオプション（税設定/データ）ポップオーバーを配置
     top_cols = st.columns([8,1])
     with top_cols[1]:
@@ -682,9 +729,24 @@ def main():
                 if rows:
                     _push_undo()
                     st.session_state["simple_trades"].extend(rows)
+                    _save_trades(st.session_state["simple_trades"])
                     st.success(f"{len(rows)}件を取り込みました")
                 if errs:
                     st.caption("\n".join([f"・{e}" for e in errs]))
+
+            # エクスポート（現在のセッション内容）
+            trades_now = st.session_state.get("simple_trades", [])
+            exp_csv = _export_csv_text(trades_now).encode('utf-8')
+            exp_json = json.dumps({'items': trades_now}, ensure_ascii=False).encode('utf-8')
+            c_ex1, c_ex2, c_ex3 = st.columns([1,1,1])
+            with c_ex1:
+                st.download_button("CSVエクスポート", data=exp_csv, file_name="trades_export.csv", mime="text/csv")
+            with c_ex2:
+                st.download_button("JSONエクスポート", data=exp_json, file_name="trades_export.json", mime="application/json")
+            with c_ex3:
+                if st.button("保存(ローカル)"):
+                    _save_trades(trades_now)
+                    st.success("保存しました (data/simple_trades.json)")
 
     st.markdown('<div class="rc-calwrap">', unsafe_allow_html=True)
     state = st_calendar(
@@ -1055,6 +1117,7 @@ def main():
                 "quantity": float(st.session_state[qty_key] or 0.0),
                 "profit": float(gross),
             })
+            _save_trades(st.session_state["simple_trades"])
             st.success("保存しました")
 
         # 登録済み一覧（当日分）と閉じる
@@ -1078,6 +1141,7 @@ def main():
                 if cols[next_col+1].button("複製", key=f"dup-{sel}-{idx}"):
                     _push_undo()
                     st.session_state["simple_trades"].append(copy.deepcopy(e))
+                    _save_trades(st.session_state["simple_trades"])
                     st.success("複製しました")
                 if cols[next_col+2].button("削除", key=f"del-{sel}-{idx}"):
                     _push_undo()
@@ -1094,6 +1158,7 @@ def main():
                             del all_list[j]
                             break
                     # 変更は次の描画で反映されます
+                    _save_trades(st.session_state["simple_trades"])
 
                 # インライン編集フォーム
                 if st.session_state.get(f"_editing_{sel}_{idx}"):
@@ -1112,6 +1177,7 @@ def main():
                                 "profit": (float(es or 0.0) - float(eb or 0.0)) * float(eq or 0.0),
                             })
                             st.session_state[f"_editing_{sel}_{idx}"] = False
+                            _save_trades(st.session_state["simple_trades"])
                             st.success("更新しました")
 
         if st.button("閉じる"):
